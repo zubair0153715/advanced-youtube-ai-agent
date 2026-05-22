@@ -1,0 +1,10 @@
+google-generativeai
+openai
+moviepy
+pytube
+google-api-python-client
+elevenlabs
+pillow
+requests
+python-dotenv
+yt-dlp
