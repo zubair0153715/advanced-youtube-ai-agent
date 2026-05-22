@@ -10,3 +10,4 @@ python-dotenv
 yt-dlp
 google-auth-oauthlib
 google-auth-httplib2
+gtts

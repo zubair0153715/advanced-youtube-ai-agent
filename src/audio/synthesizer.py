@@ -84,14 +84,21 @@ class AudioSynthesizer:
             except Exception as e:
                 logger.error(f"Error calling OpenAI TTS API: {e}", exc_info=True)
 
-        # Local fallback using simple offline tools or silent dummy audio if absolutely no keys are set
+        # Local fallback using standard free gTTS (Google Text-To-Speech) if no premium API keys are set
         if not success:
-            logger.warning("No TTS API keys available or requests failed. Generating local mock silent audio.")
-            # Create a basic 5-second silence audio file for fallback testing
-            # Since moviepy can generate silent audio, we'll write a small helper to generate a basic mp3.
-            # But wait, to keep it simple, we can copy an existing silence or create a dummy clip during rendering.
-            # To make sure we don't crash, we'll write a tiny silence clip or try to let MoviePy handle it.
-            # Let's save a placeholder or use an empty silent file. We can create a silent audio using moviepy.
+            try:
+                logger.info(f"Generating 100% free voiceover using gTTS for scene {scene_index}...")
+                from gtts import gTTS
+                tts = gTTS(text=text, lang="en")
+                tts.save(str(output_file))
+                logger.info(f"Successfully generated free Google TTS voiceover for scene {scene_index}")
+                success = True
+            except Exception as e:
+                logger.warning(f"Free gTTS generation failed: {e}. Falling back to silent dummy audio...")
+
+        # If everything failed, create silent dummy audio as emergency
+        if not success:
+            logger.warning("All TTS systems failed. Generating local mock silent audio.")
             try:
                 from moviepy import AudioArrayClip
                 import numpy as np
