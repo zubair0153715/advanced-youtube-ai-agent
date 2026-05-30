@@ -1,119 +1,455 @@
 import json
 import logging
-import google.generativeai as genai
-from typing import Dict, Any
-from src.config import GEMINI_API_KEY
+import re
+from typing import Dict, Any, List, Optional, Tuple
+from src.config import (
+    GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+    ENABLE_SENTIMENT_ANALYSIS, ENABLE_AUTO_EMOJI, logger as config_logger
+)
 
 logger = logging.getLogger("YoutubeStoryboardAgent")
 
-class StoryboardPlanner:
-    def __init__(self):
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY is not configured in the environment variables.")
-        genai.configure(api_key=GEMINI_API_KEY)
-        # Using gemini-1.5-flash as it is exceptionally fast, highly cost-effective, and natively supports JSON output.
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
 
-    def generate_plan(self, prompt: str, format_type: str = "shorts") -> Dict[str, Any]:
-        """Generates a complete storyboarding JSON with scripts, keyword searches, DALL-E prompts, and SEO details.
+class AdvancedStoryboardPlanner:
+    """Enhanced storyboard planner with multi-AI provider support, sentiment analysis, and emoji integration."""
+    
+    def __init__(self, preferred_provider: str = "auto"):
+        """
+        Initialize the planner with intelligent provider selection.
         
         Args:
-            prompt: The user's creative prompt or topic idea.
-            format_type: 'shorts' (vertical 9:16) or 'long-form' (horizontal 16:9).
+            preferred_provider: 'gemini', 'openai', 'anthropic', or 'auto' for smart selection
         """
-        logger.info(f"Generating dynamic storyboard plan for prompt: '{prompt}' (Format: {format_type})")
+        self.available_providers = []
+        self.preferred_provider = preferred_provider
         
-        system_instruction = (
-            "You are a world-class viral YouTube Content Strategist, Professional Scriptwriter, and Creative Director. "
-            "Your job is to expand a user prompt into a high-retention, fully structured video production storyboard. "
-            "The storyboard must be returned strictly in JSON format. Do not include markdown code block formatting in your response (e.g., do not wrap in ```json). "
-            f"The target format is: '{format_type}'. \n"
-            "Guidelines based on format:\n"
-            "- If format is 'shorts': The video must be extremely fast-paced, high energy, lasting between 30 to 50 seconds in total. "
-            "It must start with a massive viral hook in the first 3 seconds. Keep sentences brief (under 8 words per scene), simple, and Punchy. "
-            "The storyboard should have 4 to 8 scenes.\n"
-            "- If format is 'long-form': The video must have a compelling introduction hook (first 15-30 seconds), "
-            "a highly structured educational or narrative body, and a strong call to action at the end. Total length should be around 1 to 2 minutes for testing (8 to 15 scenes).\n\n"
-            "For EVERY scene, you must plan:\n"
-            "1. narration: The precise spoken script words. Avoid complex numbers or difficult pronunciation. Make it sound natural and conversational.\n"
-            "2. pexels_query: A short, simple, standard search query for royalty-free stock videos (e.g., 'vintage spaceship interior', 'dramatic stormy sea'). Do not use punctuation. Keep queries basic.\n"
-            "3. ai_image_prompt: A beautiful, highly descriptive prompt for an AI image generator (like DALL-E 3 or Midjourney) to generate a custom 8k cinematic visual if stock video isn't found. Specify the style (e.g., '8k, cinematic lighting, cyberpunk, photorealistic').\n"
-            "4. caption_highlights: An array of 1 to 3 words from the narration that should be heavily emphasized/highlighted in yellow or red on screen.\n"
-            "5. estimated_duration: Estimated time in seconds the narration will take to read (usually ~2.5 to 3.5 words per second)."
-        )
-
-        prompt_instructions = (
-            f"Create a production storyboard for the following concept: '{prompt}'.\n\n"
-            "Your output must conform EXACTLY to this JSON structure:\n"
-            "{\n"
-            '  "title": "A highly clickable, high-CTR YouTube video title",\n'
-            '  "description": "SEO optimized description containing rich keywords, standard formatting, and tags.",\n'
-            '  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],\n'
-            '  "storyboard": [\n'
-            "    {\n"
-            '      "scene_index": 1,\n'
-            '      "narration": "First sentence of the script.",\n'
-            '      "pexels_query": "royalty-free stock search keywords",\n'
-            '      "ai_image_prompt": "DALL-E 3 detailed image prompt",\n'
-            '      "caption_highlights": ["HIGHLIGHTED", "WORDS"],\n'
-            '      "estimated_duration": 5\n'
-            "    }\n"
-            "  ]\n"
-            "}"
-        )
-
+        # Detect available providers
+        if GEMINI_API_KEY:
+            self.available_providers.append("gemini")
+        if OPENAI_API_KEY:
+            self.available_providers.append("openai")
+        if ANTHROPIC_API_KEY:
+            self.available_providers.append("anthropic")
+        
+        if not self.available_providers:
+            logger.warning("No AI providers configured! Will use fallback templates.")
+            self.active_provider = None
+        else:
+            # Smart provider selection
+            if preferred_provider == "auto" or preferred_provider not in self.available_providers:
+                # Priority: Gemini (fastest/cheapest) > OpenAI > Anthropic
+                self.active_provider = next((p for p in ["gemini", "openai", "anthropic"] 
+                                            if p in self.available_providers), None)
+            else:
+                self.active_provider = preferred_provider
+        
+        logger.info(f"StoryboardPlanner initialized with provider: {self.active_provider}")
+        
+        # Initialize provider clients
+        if self.active_provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.model = genai.GenerativeModel("gemini-1.5-pro")
+        elif self.active_provider == "openai":
+            from openai import OpenAI
+            self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        elif self.active_provider == "anthropic":
+            import anthropic
+            self.anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    
+    def analyze_sentiment(self, text: str) -> Dict[str, float]:
+        """Analyze emotional tone of text for better voice and visual matching."""
+        if not ENABLE_SENTIMENT_ANALYSIS or not self.active_provider:
+            return {"positive": 0.5, "negative": 0.0, "neutral": 0.5, "excitement": 0.5}
+        
         try:
-            response = self.model.generate_content(
-                contents=f"{system_instruction}\n\n{prompt_instructions}",
-                generation_config={
-                    "response_mime_type": "application/json",
-                    "temperature": 0.75
-                }
+            sentiment_prompt = (
+                f"Analyze the emotional tone of this text and return ONLY valid JSON:\n"
+                f"Text: \"{text[:200]}\"\n\n"
+                "Return format: {\"positive\": 0.0-1.0, \"negative\": 0.0-1.0, \"neutral\": 0.0-1.0, "
+                "\"excitement\": 0.0-1.0, \"urgency\": 0.0-1.0}"
             )
             
-            result_text = response.text.strip()
-            # Clean possible markdown wrapping if returned anyway
-            if result_text.startswith("```"):
-                result_text = result_text.split("```")[1]
-                if result_text.startswith("json"):
-                    result_text = result_text[4:]
+            if self.active_provider == "gemini":
+                response = self.model.generate_content(
+                    sentiment_prompt,
+                    generation_config={"response_mime_type": "application/json", "temperature": 0.3}
+                )
+                return json.loads(response.text.strip())
+            elif self.active_provider == "openai":
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": sentiment_prompt}],
+                    response_format={"type": "json_object"}
+                )
+                return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            logger.warning(f"Sentiment analysis failed: {e}")
+            return {"positive": 0.5, "negative": 0.0, "neutral": 0.5, "excitement": 0.5}
+    
+    def enhance_with_emojis(self, text: str, context: str = "") -> str:
+        """Intelligently add relevant emojis to text for higher engagement."""
+        if not ENABLE_AUTO_EMOJI:
+            return text
+        
+        emoji_map = {
+            "secret": "🤫", "amazing": "😱", "shocking": "💥", "incredible": "✨",
+            "discover": "🔍", "learn": "📚", "science": "🔬", "technology": "💻",
+            "future": "🚀", "money": "💰", "success": "🏆", "danger": "⚠️",
+            "warning": "⚠️", "important": "❗", "new": "🆕", "free": "🎁",
+            "best": "👑", "worst": "💩", "love": "❤️", "hate": "💔",
+            "happy": "😊", "sad": "😢", "angry": "😡", "surprised": "😲",
+            "earth": "🌍", "space": "🌌", "ocean": "🌊", "fire": "🔥",
+            "time": "⏰", "idea": "💡", "question": "❓", "answer": "✅"
+        }
+        
+        enhanced_text = text
+        words = re.findall(r'\b\w+\b', text.lower())
+        
+        for word in words:
+            if word in emoji_map and emoji_map[word] not in enhanced_text:
+                # Add emoji after the word (case-insensitive replacement)
+                pattern = re.compile(re.escape(word), re.IGNORECASE)
+                enhanced_text = pattern.sub(f"{word} {emoji_map[word]}", enhanced_text, count=1)
+        
+        return enhanced_text
+    
+    def generate_viral_hooks(self, topic: str, count: int = 5) -> List[str]:
+        """Generate multiple viral hook options for A/B testing."""
+        hook_templates = [
+            f"You won't believe what scientists just discovered about {topic}...",
+            f"The {topic} secret they don't want you to know!",
+            f"This changes everything we knew about {topic}!",
+            f"Why everyone is talking about {topic} right now...",
+            f"The truth about {topic} will shock you!",
+            f"What happens next with {topic} is insane!",
+            f"I bet you didn't know this about {topic}!",
+            f"The dark side of {topic} exposed!"
+        ]
+        
+        if self.active_provider:
+            try:
+                hook_prompt = (
+                    f"Generate {count} ultra-viral YouTube hooks about '{topic}'. "
+                    "Each hook must be under 12 words, create curiosity, and trigger immediate interest. "
+                    "Return ONLY a JSON array of strings."
+                )
+                
+                if self.active_provider == "gemini":
+                    response = self.model.generate_content(
+                        hook_prompt,
+                        generation_config={"response_mime_type": "application/json", "temperature": 0.8}
+                    )
+                    return json.loads(response.text.strip())
+                elif self.active_provider == "openai":
+                    response = self.openai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[{"role": "user", "content": hook_prompt}],
+                        response_format={"type": "json_object"}
+                    )
+                    result = json.loads(response.choices[0].message.content)
+                    return result.get("hooks", hook_templates[:count])
+            except Exception as e:
+                logger.warning(f"AI hook generation failed: {e}")
+        
+        return hook_templates[:count]
+    
+    def optimize_for_seo(self, title: str, description: str, topic: str) -> Dict[str, Any]:
+        """Optimize title, description, and tags for maximum discoverability."""
+        if not self.active_provider:
+            # Basic SEO optimization
+            base_tags = [topic.lower().replace(" ", ""), "ai", "automation", "youtube", "viral"]
+            return {
+                "optimized_title": title,
+                "optimized_description": description,
+                "tags": base_tags,
+                "hashtags": [f"#{tag}" for tag in base_tags[:5]]
+            }
+        
+        try:
+            seo_prompt = (
+                f"Optimize this YouTube video for maximum CTR and SEO:\n"
+                f"Topic: {topic}\n"
+                f"Current Title: {title}\n"
+                f"Current Description: {description[:500]}\n\n"
+                "Return JSON with: optimized_title (under 60 chars), optimized_description (with keywords), "
+                "tags (10-15 relevant tags), hashtags (5 trending hashtags)"
+            )
             
-            plan_json = json.loads(result_text)
-            logger.info("Successfully generated storyboard JSON and validated formatting.")
-            return plan_json
+            if self.active_provider == "gemini":
+                response = self.model.generate_content(
+                    seo_prompt,
+                    generation_config={"response_mime_type": "application/json", "temperature": 0.7}
+                )
+                return json.loads(response.text.strip())
+            elif self.active_provider == "openai":
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": seo_prompt}],
+                    response_format={"type": "json_object"}
+                )
+                return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            logger.warning(f"SEO optimization failed: {e}")
+            return {
+                "optimized_title": title,
+                "optimized_description": description,
+                "tags": [topic.lower(), "ai", "viral", "trending"],
+                "hashtags": ["#viral", "#trending", "#ai"]
+            }
+    
+    def generate_plan(self, prompt: str, format_type: str = "shorts", 
+                     voice_profile: str = "default", enable_hooks: bool = True) -> Dict[str, Any]:
+        """
+        Generate a comprehensive, production-ready storyboard with advanced features.
+        
+        Args:
+            prompt: User's creative topic/prompt
+            format_type: 'shorts', 'long-form', or 'square'
+            voice_profile: Voice personality to match script tone
+            enable_hooks: Whether to generate multiple hook variations
+            
+        Returns:
+            Complete production plan with storyboard, SEO metadata, and engagement optimizations
+        """
+        import time
+        start_time = time.time()
+        
+        logger.info(f"🎬 Generating advanced storyboard for: '{prompt}' | Format: {format_type}")
+        logger.info(f"Active AI Provider: {self.active_provider}")
+        
+        # Step 1: Generate viral hooks for A/B testing
+        viral_hooks = []
+        if enable_hooks:
+            viral_hooks = self.generate_viral_hooks(prompt, count=5)
+            logger.info(f"Generated {len(viral_hooks)} viral hook variations")
+        
+        # Step 2: Build enhanced system instruction
+        scene_count = "4 to 8" if format_type == "shorts" else "10 to 15"
+        duration_range = "30-50 seconds" if format_type == "shorts" else "90-180 seconds"
+        
+        system_instruction = f"""You are an elite YouTube Content Strategist and Viral Video Expert.
+Create a high-retention storyboard optimized for {format_type} format ({duration_range} total).
+
+CRITICAL REQUIREMENTS:
+1. Start with an IRRESISTIBLE hook in the first 3 seconds that creates curiosity
+2. Each scene must have clear visual direction and emotional pacing
+3. Include pattern interrupts every 3-5 seconds to maintain attention
+4. End with a strong CTA (Call To Action)
+5. Use simple, conversational language (grade 6-8 reading level)
+
+SCENE STRUCTURE (each scene must include):
+- narration: Natural spoken script (max 15 words for shorts, 25 for long-form)
+- pexels_query: Simple 2-4 word stock footage search term
+- ai_image_prompt: Detailed DALL-E prompt with style (cinematic, 8k, dramatic lighting)
+- caption_highlights: 2-3 power words to emphasize visually
+- estimated_duration: Realistic timing in seconds
+- emotion_tag: Primary emotion (curiosity, excitement, surprise, urgency, etc.)
+- transition_suggestion: Suggested transition to next scene (fade, zoom, wipe, etc.)
+
+OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:"""
+
+        json_schema = """{
+  "title": "Ultra-clickable title under 60 characters",
+  "alternative_titles": ["Option B", "Option C"],
+  "description": "SEO-rich description with keywords and timestamps",
+  "tags": ["tag1", "tag2", ...],
+  "hashtags": ["#hashtag1", "#hashtag2", ...],
+  "category": "Education|Entertainment|Science|Technology|News",
+  "target_audience": "Description of ideal viewer",
+  "thumbnail_concept": "Visual description for thumbnail design",
+  "storyboard": [
+    {
+      "scene_index": 1,
+      "narration": "Script text here",
+      "pexels_query": "search terms",
+      "ai_image_prompt": "Detailed visual prompt",
+      "caption_highlights": ["WORD1", "WORD2"],
+      "estimated_duration": 4,
+      "emotion_tag": "curiosity",
+      "transition_suggestion": "zoom_in",
+      "on_screen_text": "Optional text overlay"
+    }
+  ],
+  "engagement_hooks": {
+    "opening_hook": "First 3-second attention grabber",
+    "midpoint_retention": "Pattern interrupt at 50%",
+    "closing_cta": "Strong call-to-action"
+  }
+}"""
+
+        full_prompt = f"{system_instruction}\n\nJSON Schema:\n{json_schema}\n\nCreate storyboard for topic: {prompt}"
+
+        # Step 3: Call AI provider
+        try:
+            if self.active_provider == "gemini":
+                response = self.model.generate_content(
+                    full_prompt,
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.75,
+                        "top_p": 0.9
+                    }
+                )
+                result_text = response.text.strip()
+            elif self.active_provider == "openai":
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are a JSON-only assistant. Return only valid JSON."},
+                        {"role": "user", "content": full_prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.75
+                )
+                result_text = response.choices[0].message.content.strip()
+            elif self.active_provider == "anthropic":
+                response = self.anthropic_client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=4096,
+                    messages=[{"role": "user", "content": full_prompt}]
+                )
+                result_text = response.content[0].text.strip()
+                # Extract JSON from response
+                json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+                if json_match:
+                    result_text = json_match.group()
+            else:
+                raise Exception("No AI provider available")
+            
+            # Clean markdown formatting
+            if result_text.startswith("```"):
+                result_text = re.search(r'```(?:json)?\s*(.*?)```', result_text, re.DOTALL)
+                result_text = result_text.group(1).strip() if result_text else result_text
+            
+            plan = json.loads(result_text)
+            
+            # Step 4: Post-process and enhance
+            logger.info("✨ Enhancing storyboard with emojis and sentiment analysis...")
+            
+            for scene in plan.get("storyboard", []):
+                # Add emojis to narration
+                if ENABLE_AUTO_EMOJI:
+                    scene["narration"] = self.enhance_with_emojis(
+                        scene.get("narration", ""),
+                        scene.get("emotion_tag", "")
+                    )
+                
+                # Analyze sentiment for voice matching
+                if ENABLE_SENTIMENT_ANALYSIS:
+                    scene["sentiment"] = self.analyze_sentiment(scene.get("narration", ""))
+            
+            # Add viral hooks
+            if viral_hooks:
+                plan["viral_hooks"] = viral_hooks
+            
+            # Optimize SEO
+            seo_data = self.optimize_for_seo(
+                plan.get("title", prompt),
+                plan.get("description", ""),
+                prompt
+            )
+            plan.update(seo_data)
+            
+            # Calculate total duration
+            total_duration = sum(scene.get("estimated_duration", 5) for scene in plan.get("storyboard", []))
+            plan["metadata"] = {
+                "total_scenes": len(plan.get("storyboard", [])),
+                "estimated_duration": total_duration,
+                "format": format_type,
+                "voice_profile": voice_profile,
+                "generation_time_seconds": round(time.time() - start_time, 2),
+                "ai_provider": self.active_provider
+            }
+            
+            logger.info(f"✅ Storyboard generated successfully in {plan['metadata']['generation_time_seconds']}s")
+            logger.info(f"   • Scenes: {plan['metadata']['total_scenes']}")
+            logger.info(f"   • Duration: ~{total_duration}s")
+            logger.info(f"   • Title: {plan.get('title', 'N/A')}")
+            
+            return plan
             
         except Exception as e:
-            logger.error(f"Error during generative storyboard creation: {e}", exc_info=True)
-            # Fallback mock storyboard if API error happens so the pipeline remains functional
-            logger.warning("Falling back to safety mock storyboard.")
-            return {
-                "title": f"The Ultimate Truth About {prompt}",
-                "description": f"Exploring the incredible details behind {prompt}. Subscribe for more mind-bending automation content! #automation #ai",
-                "tags": ["ai", "youtube automation", "shorts", "knowledge"],
-                "storyboard": [
-                    {
-                        "scene_index": 1,
-                        "narration": f"Did you know the secret behind {prompt} is changing the world?",
-                        "pexels_query": "cyberpunk digital matrix background",
-                        "ai_image_prompt": "A glowing digital grid matrix with a bright brain in the center, cinematic, neon, photorealistic, 8k",
-                        "caption_highlights": ["SECRET", "CHANGING"],
-                        "estimated_duration": 5
-                    },
-                    {
-                        "scene_index": 2,
-                        "narration": "Scientists were completely shocked when they discovered this fact.",
-                        "pexels_query": "surprised scientist laboratory",
-                        "ai_image_prompt": "A modern scientist with safety glasses looking shocked in a futuristic laboratory, warm backlighting, photorealistic, 8k",
-                        "caption_highlights": ["SHOCKED", "DISCOVERED"],
-                        "estimated_duration": 5
-                    },
-                    {
-                        "scene_index": 3,
-                        "narration": "Subscribe now for more mind blowing secrets you won't find anywhere else.",
-                        "pexels_query": "subscribe finger pressing button",
-                        "ai_image_prompt": "A neon glowing finger pressing a metallic holographic subscribe button, cinematic, particle effects, 8k",
-                        "caption_highlights": ["SUBSCRIBE", "SECRETS"],
-                        "estimated_duration": 4
-                    }
-                ]
+            logger.error(f"❌ AI storyboard generation failed: {e}", exc_info=True)
+            return self._generate_fallback_plan(prompt, format_type, viral_hooks)
+    
+    def _generate_fallback_plan(self, prompt: str, format_type: str, viral_hooks: List[str] = None) -> Dict[str, Any]:
+        """Generate a functional fallback plan when AI providers fail."""
+        logger.warning("⚠️ Using fallback template storyboard")
+        
+        is_shorts = format_type == "shorts"
+        scenes = [
+            {
+                "scene_index": 1,
+                "narration": f"🤯 You won't believe the truth about {prompt}!",
+                "pexels_query": "mysterious glowing background",
+                "ai_image_prompt": "Mysterious cosmic background with glowing particles, cinematic lighting, 8k, dramatic",
+                "caption_highlights": ["WON'T BELIEVE", "TRUTH"],
+                "estimated_duration": 4 if is_shorts else 6,
+                "emotion_tag": "curiosity",
+                "transition_suggestion": "zoom_in",
+                "sentiment": {"positive": 0.3, "excitement": 0.8, "urgency": 0.7}
+            },
+            {
+                "scene_index": 2,
+                "narration": f"🔍 Scientists made a SHOCKING discovery...",
+                "pexels_query": "scientist laboratory research",
+                "ai_image_prompt": "Professional scientist in modern lab examining glowing data, photorealistic, 8k",
+                "caption_highlights": ["SHOCKING", "DISCOVERY"],
+                "estimated_duration": 4 if is_shorts else 6,
+                "emotion_tag": "surprise",
+                "transition_suggestion": "wipe_right",
+                "sentiment": {"positive": 0.4, "excitement": 0.9, "urgency": 0.6}
+            },
+            {
+                "scene_index": 3,
+                "narration": f"💡 This changes EVERYTHING we knew!",
+                "pexels_query": "light bulb idea moment",
+                "ai_image_prompt": "Bright lightbulb exploding with ideas, abstract conceptual art, vibrant colors, 8k",
+                "caption_highlights": ["CHANGES", "EVERYTHING"],
+                "estimated_duration": 3 if is_shorts else 5,
+                "emotion_tag": "excitement",
+                "transition_suggestion": "zoom_out",
+                "sentiment": {"positive": 0.8, "excitement": 0.95, "urgency": 0.5}
+            },
+            {
+                "scene_index": 4,
+                "narration": f"👉 Subscribe for more mind-blowing secrets!",
+                "pexels_query": "subscribe button animation",
+                "ai_image_prompt": "Glowing neon subscribe button with particle effects, cyberpunk style, 8k",
+                "caption_highlights": ["SUBSCRIBE", "SECRETS"],
+                "estimated_duration": 3 if is_shorts else 4,
+                "emotion_tag": "urgency",
+                "transition_suggestion": "fade",
+                "sentiment": {"positive": 0.7, "excitement": 0.6, "urgency": 0.9}
             }
+        ]
+        
+        return {
+            "title": f"The {prompt.title()} Secret They Don't Want You To Know",
+            "alternative_titles": viral_hooks if viral_hooks else [
+                f"Why Everyone's Talking About {prompt}",
+                f"The Dark Truth About {prompt}"
+            ],
+            "description": f"Discover the incredible secrets behind {prompt}. This video will change how you see everything! 🔥\n\n👍 Like, Comment & Subscribe for more!\n\n#{prompt.replace(' ', '')} #viral #trending #ai",
+            "tags": [prompt.lower().replace(" ", ""), "viral", "trending", "ai", "automation", "secrets", "knowledge"],
+            "hashtags": ["#viral", "#trending", "#fyp", "#ai", "#knowledge"],
+            "category": "Education",
+            "target_audience": "Curious learners aged 16-35 interested in cutting-edge topics",
+            "thumbnail_concept": f"Dramatic close-up with bold text '{prompt.upper()[:20]}...' and shocking expression",
+            "storyboard": scenes,
+            "engagement_hooks": {
+                "opening_hook": "Start with shocking statement or question",
+                "midpoint_retention": "Reveal unexpected twist at 50% mark",
+                "closing_cta": "Strong subscribe call with value proposition"
+            },
+            "metadata": {
+                "total_scenes": len(scenes),
+                "estimated_duration": sum(s["estimated_duration"] for s in scenes),
+                "format": format_type,
+                "voice_profile": "default",
+                "generation_time_seconds": 0.1,
+                "ai_provider": "fallback_template",
+                "is_fallback": True
+            }
+        }
