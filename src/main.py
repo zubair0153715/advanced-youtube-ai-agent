@@ -380,9 +380,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--format",
         type=str,
-        choices=["shorts", "long-form"],
-        default="shorts",
-        help="Target video format (shorts: portrait 9:16 or long-form: landscape 16:9)."
+        choices=["shorts", "long-form", "square"],
+        default="long-form",
+        help="Target video format (shorts: portrait 9:16 ~30-50s, long-form: landscape 16:9 ~5-15min, square: 1:1 ~60-90s). Default is long-form for longer videos."
     )
     parser.add_argument(
         "--upload",
@@ -395,6 +395,13 @@ if __name__ == "__main__":
         choices=["private", "unlisted", "public"],
         default="private",
         help="Upload privacy visibility status on YouTube (default: private)."
+    )
+    parser.add_argument(
+        "--quality",
+        type=str,
+        choices=["low", "medium", "high", "ultra"],
+        default="ultra",
+        help="Video output quality preset (default: ultra for best quality)."
     )
     
     args = parser.parse_args()

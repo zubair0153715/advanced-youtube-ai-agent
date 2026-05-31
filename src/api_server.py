@@ -68,15 +68,16 @@ job_store: Dict[str, Dict[str, Any]] = {}
 # ==================== Pydantic Models ====================
 
 class VideoGenerationRequest(BaseModel):
-    topic: str = Field(..., min_length=5, max_length=500, description="Video topic or prompt")
-    format_type: str = Field(default="shorts", enum=["shorts", "standard", "landscape"])
-    voice_profile: str = Field(default="default", enum=["default", "narrator", "energetic", "calm"])
+    topic: str = Field(..., min_length=5, max_length=1000, description="Video topic or prompt")
+    format_type: str = Field(default="landscape", enum=["shorts", "standard", "landscape", "long_form"])
+    voice_profile: str = Field(default="default", enum=["default", "narrator", "energetic", "calm", "documentary"])
     ai_provider: str = Field(default="auto", enum=["auto", "gemini", "openai", "anthropic"])
     enable_hooks: bool = Field(default=True, description="Generate viral hook variations")
     enable_sentiment: bool = Field(default=True, description="Analyze sentiment for voice/visual matching")
-    enable_emoji: bool = Field(default=True, description="Auto-add emojis to script")
-    duration_seconds: Optional[int] = Field(default=None, ge=10, le=600)
-    batch_count: int = Field(default=1, ge=1, le=10, description="Number of variations to generate")
+    enable_emoji: bool = Field(default=False, description="Auto-add emojis to script")
+    duration_seconds: Optional[int] = Field(default=None, ge=60, le=3600, description="Video duration in seconds (1-60 minutes)")
+    quality: str = Field(default="ultra", enum=["low", "medium", "high", "ultra", "4k"], description="Video quality preset")
+    batch_count: int = Field(default=1, ge=1, le=5, description="Number of variations to generate")
 
 class JobStatusResponse(BaseModel):
     job_id: str
@@ -156,8 +157,9 @@ async def process_video_generation(job_id: str, request: VideoGenerationRequest)
             "download_url": f"/api/download/{output_filename}",
             "storyboard": storyboard,
             "metrics": result.get("metrics", {}) if isinstance(result, dict) else {},
-            "duration_seconds": request.duration_seconds or 60,
-            "format": request.format_type
+            "duration_seconds": request.duration_seconds or 300,
+            "format": request.format_type,
+            "quality": request.quality
         }
         
         job_store[job_id]["progress"] = 100
@@ -321,22 +323,23 @@ async def root():
 </head>
 <body>
     <div class="container">
-        <h1>🎬 YouTube AI Studio</h1>
-        <p class="subtitle">Generate professional videos with AI in real-time</p>
+        <h1>🎬 YouTube AI Studio - Pro</h1>
+        <p class="subtitle">Generate professional long-form videos (5-60 minutes) with AI in real-time</p>
         
         <form id="videoForm">
             <div class="form-group">
                 <label for="topic">Video Topic / Prompt *</label>
-                <textarea id="topic" name="topic" rows="3" placeholder="e.g., The Future of Quantum Computing Explained in 60 Seconds" required></textarea>
+                <textarea id="topic" name="topic" rows="3" placeholder="e.g., Complete Guide to Machine Learning - Full Documentary" required></textarea>
             </div>
             
             <div class="grid-options">
                 <div class="form-group">
                     <label for="format_type">Format</label>
                     <select id="format_type" name="format_type">
-                        <option value="shorts">Shorts (9:16)</option>
-                        <option value="standard">Standard (1:1)</option>
-                        <option value="landscape">Landscape (16:9)</option>
+                        <option value="landscape" selected>Landscape (16:9) - YouTube</option>
+                        <option value="shorts">Shorts (9:16) - TikTok/Reels</option>
+                        <option value="standard">Standard (1:1) - Instagram</option>
+                        <option value="long_form">Long Form (16:9) - Documentary</option>
                     </select>
                 </div>
                 
@@ -347,6 +350,31 @@ async def root():
                         <option value="narrator">Narrator</option>
                         <option value="energetic">Energetic</option>
                         <option value="calm">Calm</option>
+                        <option value="documentary">Documentary</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="quality">Quality</label>
+                    <select id="quality" name="quality">
+                        <option value="low">Low (480p)</option>
+                        <option value="medium">Medium (720p)</option>
+                        <option value="high" selected>High (1080p)</option>
+                        <option value="ultra">Ultra (2K)</option>
+                        <option value="4k">4K Ultra HD</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="duration_seconds">Duration (minutes)</label>
+                    <select id="duration_minutes" name="duration_minutes">
+                        <option value="5">5 minutes</option>
+                        <option value="10">10 minutes</option>
+                        <option value="15">15 minutes</option>
+                        <option value="20">20 minutes</option>
+                        <option value="30">30 minutes</option>
+                        <option value="45">45 minutes</option>
+                        <option value="60">60 minutes (1 hour)</option>
                     </select>
                 </div>
                 
@@ -373,7 +401,7 @@ async def root():
                         <label for="enable_sentiment" style="margin:0; font-weight:normal;">Sentiment Analysis</label>
                     </div>
                     <div class="checkbox-item">
-                        <input type="checkbox" id="enable_emoji" name="enable_emoji" checked>
+                        <input type="checkbox" id="enable_emoji" name="enable_emoji">
                         <label for="enable_emoji" style="margin:0; font-weight:normal;">Auto Emoji</label>
                     </div>
                 </div>
@@ -431,7 +459,9 @@ async def root():
                 ai_provider: document.getElementById('ai_provider').value,
                 enable_hooks: document.getElementById('enable_hooks').checked,
                 enable_sentiment: document.getElementById('enable_sentiment').checked,
-                enable_emoji: document.getElementById('enable_emoji').checked
+                enable_emoji: document.getElementById('enable_emoji').checked,
+                quality: document.getElementById('quality').value,
+                duration_seconds: parseInt(document.getElementById('duration_minutes').value) * 60
             };
             
             try {
@@ -486,13 +516,17 @@ async def root():
             const resultDetails = document.getElementById('resultDetails');
             const downloadLink = document.getElementById('downloadLink');
             
+            const durationMinutes = Math.round(data.result.duration_seconds / 60);
             resultDetails.innerHTML = `
                 <strong>Format:</strong> ${data.result.format}<br>
-                <strong>Duration:</strong> ${data.result.duration_seconds}s<br>
-                <strong>Scenes:</strong> ${data.result.storyboard.scenes?.length || 0}
+                <strong>Quality:</strong> ${data.result.quality || 'High'}<br>
+                <strong>Duration:</strong> ${durationMinutes} minutes (${data.result.duration_seconds}s)<br>
+                <strong>Scenes:</strong> ${data.result.storyboard.scenes?.length || 0}<br>
+                <strong>Status:</strong> Ready to download!
             `;
             
             downloadLink.href = data.result.download_url;
+            downloadLink.textContent = '📥 Download Video (' + (data.result.quality || 'HD') + ')';
             resultSection.style.display = 'block';
         }
     </script>
