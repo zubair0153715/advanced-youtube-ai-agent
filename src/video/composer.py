@@ -9,17 +9,20 @@ from moviepy import (
 )
 from src.config import (
     VIDEO_FPS, DIMENSIONS_LANDSCAPE, DIMENSIONS_PORTRAIT,
-    OUTPUT_DIR
+    OUTPUT_DIR, get_quality_settings, VIDEO_QUALITY
 )
 from src.video.subtitle_drawer import SubtitleDrawer
 
 logger = logging.getLogger("YoutubeVideoComposer")
 
 class VideoComposer:
-    def __init__(self, format_type: str = "shorts"):
+    def __init__(self, format_type: str = "shorts", enable_smart_transitions: bool = True):
         self.format_type = format_type
         self.dimensions = DIMENSIONS_PORTRAIT if format_type == "shorts" else DIMENSIONS_LANDSCAPE
         self.subtitle_drawer = SubtitleDrawer(format_type)
+        self.enable_smart_transitions = enable_smart_transitions
+        # Get quality settings from config
+        self.quality_settings = get_quality_settings(VIDEO_QUALITY)
 
     def compose_video(self, scenes: List[Dict[str, Any]], background_music_path: Optional[str] = None) -> str:
         """Assembles, mixes, overlays subtitles, and renders the final MP4 video.
@@ -110,16 +113,19 @@ class VideoComposer:
             except Exception as e:
                 logger.error(f"Failed to mix background music: {e}", exc_info=True)
 
-        # 6. Render Final Video Output
+        # 6. Render Final Video Output with enhanced quality settings
         output_filename = f"final_render_{self.format_type}_{int(time.time())}.mp4"
         output_path = OUTPUT_DIR / output_filename
-        logger.info(f"Rendering final high-quality video clip to: {output_path}")
+        logger.info(f"Rendering final {VIDEO_QUALITY} quality video clip to: {output_path}")
+        logger.info(f"Using codec: {self.quality_settings['codec']}, preset: {self.quality_settings['preset']}, CRF: {self.quality_settings['crf']}")
 
         final_video.write_videofile(
             str(output_path),
             fps=VIDEO_FPS,
-            codec="libx264",
+            codec=self.quality_settings["codec"],
             audio_codec="aac",
+            audio_bitrate=self.quality_settings["audio_bitrate"],
+            preset=self.quality_settings["preset"],
             temp_audiofile=str(OUTPUT_DIR / "temp_audio.m4a"),
             remove_temp=True,
             threads=4,

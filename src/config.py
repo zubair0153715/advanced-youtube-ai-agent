@@ -69,18 +69,19 @@ logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
 # Video Configurations - Enhanced with quality presets
-VIDEO_FPS = int(os.getenv("VIDEO_FPS", "24"))
-VIDEO_QUALITY = os.getenv("VIDEO_QUALITY", "high")  # low, medium, high, ultra
-DIMENSIONS_LANDSCAPE = (1920, 1080)  # 16:9 for Long-form
+VIDEO_FPS = int(os.getenv("VIDEO_FPS", "30"))  # Increased from 24 to 30 for smoother video
+VIDEO_QUALITY = os.getenv("VIDEO_QUALITY", "ultra")  # Default changed to ultra for best quality
+DIMENSIONS_LANDSCAPE = (1920, 1080)  # 16:9 for Long-form (Full HD)
 DIMENSIONS_PORTRAIT = (1080, 1920)   # 9:16 for Shorts
 DIMENSIONS_SQUARE = (1080, 1080)     # 1:1 for Instagram/Facebook
 
-# Quality preset mappings
+# Quality preset mappings - Enhanced for better quality output with 4K support
 QUALITY_PRESETS = {
-    "low": {"codec": "libx264", "preset": "ultrafast", "crf": 28, "audio_bitrate": "64k"},
-    "medium": {"codec": "libx264", "preset": "medium", "crf": 23, "audio_bitrate": "128k"},
-    "high": {"codec": "libx264", "preset": "slow", "crf": 18, "audio_bitrate": "192k"},
-    "ultra": {"codec": "libx265", "preset": "slow", "crf": 16, "audio_bitrate": "256k"}
+    "low": {"codec": "libx264", "preset": "ultrafast", "crf": 28, "audio_bitrate": "64k", "resolution": "854x480"},
+    "medium": {"codec": "libx264", "preset": "medium", "crf": 23, "audio_bitrate": "128k", "resolution": "1280x720"},
+    "high": {"codec": "libx264", "preset": "slow", "crf": 18, "audio_bitrate": "192k", "resolution": "1920x1080"},
+    "ultra": {"codec": "libx265", "preset": "veryslow", "crf": 15, "audio_bitrate": "320k", "resolution": "2560x1440"},
+    "4k": {"codec": "libx265", "preset": "veryslow", "crf": 12, "audio_bitrate": "320k", "resolution": "3840x2160"}
 }
 
 # Font Configurations - Enhanced with emoji support
@@ -124,12 +125,13 @@ ENABLE_SMART_TRANSITIONS = os.getenv("ENABLE_SMART_TRANSITIONS", "true").lower()
 ENABLE_BATCH_PROCESSING = os.getenv("ENABLE_BATCH_PROCESSING", "false").lower() == "true"
 ENABLE_ANALYTICS_TRACKING = os.getenv("ENABLE_ANALYTICS_TRACKING", "true").lower() == "true"
 
-# Voice Configuration - Multiple voice profiles
+# Voice Configuration - Multiple voice profiles with documentary support
 VOICE_PROFILES = {
     "default": {"voice_id": ELEVENLABS_VOICE_ID, "stability": 0.75, "similarity": 0.75},
     "narrator": {"voice_id": os.getenv("ELEVENLABS_NARRATOR_ID", "pNInz6obpgqjVWt2A4mH"), "stability": 0.8, "similarity": 0.8},
     "energetic": {"voice_id": os.getenv("ELEVENLABS_ENERGETIC_ID", "EXAVITQu4vr4xnSDxMaL"), "stability": 0.6, "similarity": 0.9},
-    "calm": {"voice_id": os.getenv("ELEVENLABS_CALM_ID", "MF3mGyEYCl7XYWbV9V6O"), "stability": 0.9, "similarity": 0.7}
+    "calm": {"voice_id": os.getenv("ELEVENLABS_CALM_ID", "MF3mGyEYCl7XYWbV9V6O"), "stability": 0.9, "similarity": 0.7},
+    "documentary": {"voice_id": os.getenv("ELEVENLABS_DOCUMENTARY_ID", "VR6AewLTigWG4xSOukaG"), "stability": 0.85, "similarity": 0.85}
 }
 
 # Music & Audio Settings

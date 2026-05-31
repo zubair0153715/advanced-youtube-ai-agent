@@ -225,8 +225,19 @@ class AdvancedStoryboardPlanner:
             logger.info(f"Generated {len(viral_hooks)} viral hook variations")
         
         # Step 2: Build enhanced system instruction
-        scene_count = "4 to 8" if format_type == "shorts" else "10 to 15"
-        duration_range = "30-50 seconds" if format_type == "shorts" else "90-180 seconds"
+        # Duration configuration: shorts (30-50s), long-form (5-15 minutes), square (60-90s)
+        if format_type == "shorts":
+            scene_count = "4 to 8"
+            duration_range = "30-50 seconds"
+            narration_limit = "15 words"
+        elif format_type == "long-form":
+            scene_count = "20 to 40"
+            duration_range = "5-15 minutes (300-900 seconds)"
+            narration_limit = "30-40 words"
+        else:  # square
+            scene_count = "8 to 12"
+            duration_range = "60-90 seconds"
+            narration_limit = "20 words"
         
         system_instruction = f"""You are an elite YouTube Content Strategist and Viral Video Expert.
 Create a high-retention storyboard optimized for {format_type} format ({duration_range} total).
@@ -237,13 +248,14 @@ CRITICAL REQUIREMENTS:
 3. Include pattern interrupts every 3-5 seconds to maintain attention
 4. End with a strong CTA (Call To Action)
 5. Use simple, conversational language (grade 6-8 reading level)
+6. For long-form videos: Create comprehensive content with deep dives, examples, and storytelling
 
 SCENE STRUCTURE (each scene must include):
-- narration: Natural spoken script (max 15 words for shorts, 25 for long-form)
+- narration: Natural spoken script (max {narration_limit})
 - pexels_query: Simple 2-4 word stock footage search term
 - ai_image_prompt: Detailed DALL-E prompt with style (cinematic, 8k, dramatic lighting)
 - caption_highlights: 2-3 power words to emphasize visually
-- estimated_duration: Realistic timing in seconds
+- estimated_duration: Realistic timing in seconds (5-8s for shorts, 8-15s for long-form)
 - emotion_tag: Primary emotion (curiosity, excitement, surprise, urgency, etc.)
 - transition_suggestion: Suggested transition to next scene (fade, zoom, wipe, etc.)
 
@@ -377,53 +389,56 @@ OUTPUT FORMAT: Return ONLY valid JSON matching this exact schema:"""
         """Generate a functional fallback plan when AI providers fail."""
         logger.warning("⚠️ Using fallback template storyboard")
         
-        is_shorts = format_type == "shorts"
-        scenes = [
-            {
-                "scene_index": 1,
-                "narration": f"🤯 You won't believe the truth about {prompt}!",
-                "pexels_query": "mysterious glowing background",
-                "ai_image_prompt": "Mysterious cosmic background with glowing particles, cinematic lighting, 8k, dramatic",
-                "caption_highlights": ["WON'T BELIEVE", "TRUTH"],
-                "estimated_duration": 4 if is_shorts else 6,
-                "emotion_tag": "curiosity",
-                "transition_suggestion": "zoom_in",
-                "sentiment": {"positive": 0.3, "excitement": 0.8, "urgency": 0.7}
-            },
-            {
-                "scene_index": 2,
-                "narration": f"🔍 Scientists made a SHOCKING discovery...",
-                "pexels_query": "scientist laboratory research",
-                "ai_image_prompt": "Professional scientist in modern lab examining glowing data, photorealistic, 8k",
-                "caption_highlights": ["SHOCKING", "DISCOVERY"],
-                "estimated_duration": 4 if is_shorts else 6,
-                "emotion_tag": "surprise",
-                "transition_suggestion": "wipe_right",
-                "sentiment": {"positive": 0.4, "excitement": 0.9, "urgency": 0.6}
-            },
-            {
-                "scene_index": 3,
-                "narration": f"💡 This changes EVERYTHING we knew!",
-                "pexels_query": "light bulb idea moment",
-                "ai_image_prompt": "Bright lightbulb exploding with ideas, abstract conceptual art, vibrant colors, 8k",
-                "caption_highlights": ["CHANGES", "EVERYTHING"],
-                "estimated_duration": 3 if is_shorts else 5,
-                "emotion_tag": "excitement",
-                "transition_suggestion": "zoom_out",
-                "sentiment": {"positive": 0.8, "excitement": 0.95, "urgency": 0.5}
-            },
-            {
-                "scene_index": 4,
-                "narration": f"👉 Subscribe for more mind-blowing secrets!",
-                "pexels_query": "subscribe button animation",
-                "ai_image_prompt": "Glowing neon subscribe button with particle effects, cyberpunk style, 8k",
-                "caption_highlights": ["SUBSCRIBE", "SECRETS"],
-                "estimated_duration": 3 if is_shorts else 4,
-                "emotion_tag": "urgency",
-                "transition_suggestion": "fade",
-                "sentiment": {"positive": 0.7, "excitement": 0.6, "urgency": 0.9}
-            }
-        ]
+        # Duration configuration for fallback plans
+        if format_type == "shorts":
+            scene_duration_base = 4
+            num_scenes = 6
+        elif format_type == "long-form":
+            scene_duration_base = 12
+            num_scenes = 30  # More scenes for longer videos
+        else:  # square
+            scene_duration_base = 6
+            num_scenes = 10
+        
+        scenes = []
+        # Generate dynamic number of scenes based on format type
+        for i in range(num_scenes):
+            if i == 0:
+                narration = f"🤯 You won't believe the truth about {prompt}!"
+                emotion = "curiosity"
+                duration = scene_duration_base + 2
+            elif i == num_scenes - 1:
+                narration = f"👉 Subscribe for more mind-blowing secrets!"
+                emotion = "urgency"
+                duration = scene_duration_base - 1
+            else:
+                narrations = [
+                    f"🔍 Scientists made a SHOCKING discovery...",
+                    f"💡 This changes EVERYTHING we knew!",
+                    f"✨ The results will blow your mind!",
+                    f"🚀 Here's what happens next...",
+                    f"⚠️ But there's a catch...",
+                    f"🎯 The real secret is...",
+                    f"🌟 This could change your life!",
+                    f"📊 The data shows something amazing...",
+                    f"🔥 Why everyone's talking about this...",
+                    f"💰 The implications are huge!"
+                ]
+                narration = narrations[i % len(narrations)]
+                emotion = ["surprise", "excitement", "curiosity", "amazement"][i % 4]
+                duration = scene_duration_base + (i % 3)
+            
+            scenes.append({
+                "scene_index": i + 1,
+                "narration": narration,
+                "pexels_query": "cinematic background",
+                "ai_image_prompt": f"Cinematic visual for {prompt}, dramatic lighting, 8k, professional quality",
+                "caption_highlights": ["AMAZING", "SECRET"] if i == 0 else ["DISCOVER", "TRUTH"],
+                "estimated_duration": duration,
+                "emotion_tag": emotion,
+                "transition_suggestion": ["zoom_in", "wipe_right", "fade", "zoom_out"][i % 4],
+                "sentiment": {"positive": 0.5 + (i * 0.05), "excitement": 0.8, "urgency": 0.6 if i == num_scenes - 1 else 0.5}
+            })
         
         return {
             "title": f"The {prompt.title()} Secret They Don't Want You To Know",
